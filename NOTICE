@@ -1,0 +1,48 @@
+GramSeg
+Copyright 2026 The GramSeg Authors
+
+This product includes software developed by The GramSeg Authors,
+licensed under the Apache License, Version 2.0 (see LICENSE).
+
+
+-------------------------------------------------------------------------------
+Third-party code and attribution
+-------------------------------------------------------------------------------
+
+1. CorrCLIP -- https://github.com/zdk258/CorrCLIP
+   Pinned commit: 6c1fd2c02ff90f071ed744a5998be0cda7ad75b4
+
+   GramSeg's evaluation harness is CorrCLIP's. The upstream repository ships
+   NO top-level LICENSE file, which means its source is "all rights reserved"
+   and CANNOT be redistributed here.
+
+   Consequently this repository contains NO CorrCLIP source code. Our changes
+   to it are distributed as minimal unified diffs under patches/, which the
+   user applies to their own upstream checkout. See patches/README.md.
+
+2. Trident -- https://github.com/YuHengsss/Trident
+   Licensed under the Apache License, Version 2.0.
+
+   The interchangeability experiment ("slot-in" study) drops our Gram affinity
+   kernel into Trident's correlation slot. Any Trident-derived code the user
+   assembles by following our instructions remains under Trident's Apache-2.0
+   terms; attribution to the Trident authors is required.
+
+3. SED -- https://github.com/xb534/SED
+   Licensed under the Apache License, Version 2.0.
+
+   legacy/sed_frozen/ contains our own adapter / frozen-training scripts from
+   an abandoned exploration that targeted SED as its base. They import SED and
+   detectron2 APIs but contain no verbatim SED source.
+
+4. Upstream models and libraries used at runtime (not redistributed here):
+   - DINOv3 / DINOv2 (Meta AI) -- frozen ViT backbones, subject to Meta's
+     respective model licenses; obtain weights from the official source.
+   - dino.txt (Meta AI) -- text head used only as a comparison baseline.
+   - OpenCLIP / MetaCLIP -- CLIP weights and tokenizer.
+   - SAM 2 (Meta AI) -- used only as a baseline mask source for comparison.
+   - Stable Diffusion 2.1-base -- used only to run a diffusion-based baseline.
+   - MMSegmentation / MMEngine (OpenMMLab) -- Apache-2.0, evaluation protocol.
+
+   Each of the above is governed by its own license. Users are responsible for
+   obtaining these weights and complying with their terms.

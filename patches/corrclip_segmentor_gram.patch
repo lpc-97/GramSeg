@@ -1,0 +1,43 @@
+--- corrclip_segmentor.py.orig
++++ corrclip_segmentor.py
+@@ -270,6 +270,29 @@
+                 stability_score_thresh=0.4,
+                 multimask_output=False,
+             )
++        elif generator_type == 'gram':
++            # Gram-Seed masks from frozen DINOv3 (online fallback route).
++            # gram_mask_generator.py must sit next to this file; configured
++            # via GRAM_* env vars because mmengine cfg only carries the
++            # mask_generator type string. Requires timm >= 1.0.20 (DINOv3
++            # support) in the running env -- otherwise use the offline
++            # pre-generated npz route (gen_gram_masks.py).
++            from gram_mask_generator import GramMaskGenerator
++            self.mask_generator = GramMaskGenerator(
++                weights_file=os.environ.get(
++                    'GRAM_WEIGHTS',
++                    os.path.expanduser('~/dino_rtp_seg/dinov3_vits16.safetensors')),
++                variant=os.environ.get('GRAM_VARIANT', 'vits16'),
++                k=int(os.environ.get('GRAM_K', '64')),
++                tau=float(os.environ.get('GRAM_TAU', '0.07')),
++                refine_rounds=int(os.environ.get('GRAM_REFINE', '1')),
++                binarize=os.environ.get('GRAM_BINARIZE', 'hard'),
++                top_p=float(os.environ.get('GRAM_TOP_P', '0.9')),
++                conf_thresh=float(os.environ.get('GRAM_CONF', '0.0')),
++                img_size=int(os.environ.get('GRAM_IMG_SIZE', '896')),
++                upsample=os.environ.get('GRAM_UPSAMPLE', 'nearest'),
++                device=self.device,
++            )
+ 
+     def generate_mask(self, img_path):
+         # output shape: [H, W];
+@@ -340,6 +363,10 @@
+                     instance_mask[m] = instance_id
+                     instance_id += 1
+             instance_mask = torch.from_numpy(instance_mask).to(self.device)
++        elif self.mask_generator_type == 'gram':
++            image = Image.open(img_path).convert("RGB")
++            # returns int32 [H, W] on self.device; 0 = unsegmented union
++            instance_mask = self.mask_generator.generate(image)
+         else:
+             instance_mask = None
+ 

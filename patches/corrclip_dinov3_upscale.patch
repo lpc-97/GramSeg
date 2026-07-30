@@ -1,0 +1,50 @@
+# Incremental patch on top of corrclip_segmentor_dinov3.patch (apply AFTER it).
+# Usage: cd ~/CorrCLIP && patch -p0 < corrclip_dinov3_upscale.patch
+# Adds DINOV3_CORR_UPSCALE (default 2.0): bilinear-upscales the dinov3 input
+# so the patch16 grid matches hub-DINO patch8 (336-crop: 21x21 -> 42x42).
+# Set DINOV3_CORR_UPSCALE=1.0 to reproduce the pre-patch behavior.
+--- corrclip_segmentor.py.orig
++++ corrclip_segmentor.py
+@@ -77,6 +77,13 @@
+         # 56 = lcm(14, 8) for hub dino, 112 = lcm(14, 16) for dinov3 (timm
+         # asserts input dims divisible by 16, and 112 is a multiple of 56)
+         self.pad_multiple = 112 if self.dino_patch_size == 16 else 56
++        # correlation-map upscaling (dinov3 only): enlarge the input before
++        # the dinov3 forward so the /16 token grid matches hub-DINO's /8 grid
++        # (336-crop: 21x21 -> 42x42 at factor 2.0). dynamic_img_size=True
++        # already handles arbitrary input sizes; CLIP still sees the original
++        # crop. Env: DINOV3_CORR_UPSCALE, default 2.0 (set 1.0 to disable).
++        self.dino_upscale = float(os.environ.get('DINOV3_CORR_UPSCALE', '2.0')) \
++            if dino_type.startswith('dinov3') else 1.0
+ 
+         self.dino_qkv_output = None
+         self.dino.blocks[-1].attn.qkv.register_forward_hook(self._hook_fn_forward_qkv)
+@@ -146,15 +153,26 @@
+ 
+         # Forward pass in the model
+         self.dino_qkv_output = None
++        dino_in = imgs_norm
+         if self.dino_type.startswith("dinov3"):
++            if self.dino_upscale != 1.0:
++                # round each side to a multiple of dino_patch_size so timm's
++                # divisible-by-16 requirement holds for ANY factor; sliding
++                # window pads crops to multiples of 112, so at 2.0 this is
++                # exact (112*2=224, 224%16==0) and feat_shape needs no floor
++                ps = self.dino_patch_size
++                tgt = [max(ps, int(round(s * self.dino_upscale / ps)) * ps)
++                       for s in imgs_norm.shape[-2:]]
++                dino_in = F.interpolate(imgs_norm, size=tgt, mode='bilinear',
++                                        align_corners=False)
+             # timm path: forward_features runs every block, so it fires the
+             # blocks[-1].attn.qkv hook just like get_intermediate_layers(n=1)
+-            feat = self.dino.forward_features(imgs_norm)
++            feat = self.dino.forward_features(dino_in)
+         else:
+             feat = self.dino.get_intermediate_layers(imgs_norm, n=1)[-1]
+ 
+         patch_size = self.dino_patch_size
+-        feat_shape = (imgs_norm[0].shape[-2] // patch_size, imgs_norm[0].shape[-1] // patch_size)
++        feat_shape = (dino_in.shape[-2] // patch_size, dino_in.shape[-1] // patch_size)
+         nb_im = feat.shape[0]  # Batch size
+         nb_tokens = feat.shape[1]  # Number of tokens
+ 

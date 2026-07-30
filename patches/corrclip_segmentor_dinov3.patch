@@ -1,0 +1,106 @@
+# Usage: cd ~/CorrCLIP && patch -p0 < corrclip_segmentor_dinov3.patch   (compatible with corrclip_segmentor_gram.patch, any order)
+# Eval:  DINOV3_WEIGHTS=~/dino_rtp_seg/dinov3_vits16.safetensors python eval.py --config ./configs/cfg_ade20k.py --cfg-options model.dino_type=dinov3_vits16
+# Needs timm >= 1.0.20 in the corrclip env (DINOv3 support); on ImportError run: pip install -U timm
+--- corrclip_segmentor.py.orig
++++ corrclip_segmentor.py
+@@ -59,11 +59,24 @@
+             p.requires_grad = False
+         self.tokenizer = tokenizer.tokenize
+ 
+-        self.dino = torch.hub.load('facebookresearch/dino:main', dino_type)
++        if dino_type.startswith("dinov3"):
++            self.dino = self._load_dinov3_timm(dino_type)
++        else:
++            self.dino = torch.hub.load('facebookresearch/dino:main', dino_type)
+         self.dino.eval().to(device)
+         for p in self.dino.parameters():
+             p.requires_grad = False
+         self.dino = self.dino.half()
++        self.dino_type = dino_type
++        # facebook-hub dino has CLS only (no num_prefix_tokens attr -> 1);
++        # timm dinov3 = CLS + 4 register tokens -> num_prefix_tokens == 5
++        self.dino_num_prefix = getattr(self.dino, 'num_prefix_tokens', 1)
++        _ps = self.dino.patch_embed.patch_size
++        self.dino_patch_size = _ps[0] if isinstance(_ps, (tuple, list)) else _ps
++        # sliding-window pad multiple: lcm(clip_patch=14, dino_patch);
++        # 56 = lcm(14, 8) for hub dino, 112 = lcm(14, 16) for dinov3 (timm
++        # asserts input dims divisible by 16, and 112 is a multiple of 56)
++        self.pad_multiple = 112 if self.dino_patch_size == 16 else 56
+ 
+         self.dino_qkv_output = None
+         self.dino.blocks[-1].attn.qkv.register_forward_hook(self._hook_fn_forward_qkv)
+@@ -88,6 +101,40 @@
+     def _hook_fn_forward_qkv(self, module, input, output):
+         self.dino_qkv_output = output
+ 
++    @staticmethod
++    def _load_dinov3_timm(dino_type):
++        """DINOv3 backbone via timm, weights from a LOCAL safetensors file
++        (no network). Path comes from $DINOV3_WEIGHTS, default
++        ~/dino_rtp_seg/dinov3_vits16.safetensors. Trigger at eval time with
++        --cfg-options model.dino_type=dinov3_vits16
++        """
++        try:
++            import timm
++        except ImportError as e:
++            raise ImportError(
++                f"dino_type={dino_type} needs timm with DINOv3 support "
++                f"(>= 1.0.20) in this env. Fix: pip install -U timm") from e
++        timm_names = {
++            'dinov3_vits16': 'vit_small_patch16_dinov3.lvd1689m',
++            'dinov3_vitb16': 'vit_base_patch16_dinov3.lvd1689m',
++        }
++        assert dino_type in timm_names, \
++            f"unknown dinov3 dino_type: {dino_type} (known: {sorted(timm_names)})"
++        weights = os.environ.get('DINOV3_WEIGHTS', os.path.expanduser(
++            '~/dino_rtp_seg/dinov3_vits16.safetensors'))
++        assert os.path.isfile(weights), (
++            f"DINOv3 weights not found: {weights} -- set $DINOV3_WEIGHTS to "
++            f"the local timm-converted safetensors file")
++        try:
++            return timm.create_model(
++                timm_names[dino_type], pretrained=True, num_classes=0,
++                dynamic_img_size=True, pretrained_cfg_overlay=dict(file=weights))
++        except Exception as e:
++            raise RuntimeError(
++                f"timm.create_model('{timm_names[dino_type]}') failed -- this "
++                f"timm probably predates DINOv3. Fix: pip install -U timm "
++                f"(cause: {e})") from e
++
+     @torch.inference_mode()
+     def forward_feature(self, img, masks):
+         if type(img) == list:
+@@ -99,16 +146,21 @@
+ 
+         # Forward pass in the model
+         self.dino_qkv_output = None
+-        feat = self.dino.get_intermediate_layers(imgs_norm, n=1)[-1]
++        if self.dino_type.startswith("dinov3"):
++            # timm path: forward_features runs every block, so it fires the
++            # blocks[-1].attn.qkv hook just like get_intermediate_layers(n=1)
++            feat = self.dino.forward_features(imgs_norm)
++        else:
++            feat = self.dino.get_intermediate_layers(imgs_norm, n=1)[-1]
+ 
+-        patch_size = self.dino.patch_embed.patch_size
++        patch_size = self.dino_patch_size
+         feat_shape = (imgs_norm[0].shape[-2] // patch_size, imgs_norm[0].shape[-1] // patch_size)
+         nb_im = feat.shape[0]  # Batch size
+         nb_tokens = feat.shape[1]  # Number of tokens
+ 
+         qkv = self.dino_qkv_output.reshape(nb_im, nb_tokens, 3, -1).permute(2, 0, 1, 3)
+         dino_feats = qkv[0] + qkv[1]  #B, L, C
+-        dino_feats = dino_feats[:, 1:, ]
++        dino_feats = dino_feats[:, self.dino_num_prefix:, ]
+         dino_feats = F.normalize(dino_feats, dim=-1)
+ 
+         image_features = self.clip.encode_image(img.half(), dino_feats=dino_feats, feat_shape=feat_shape, instance_masks=masks)
+@@ -153,7 +205,7 @@
+ 
+                 # pad image when (image_size % patch_size != 0)
+                 H, W = crop_img.shape[2:]  # original image shape
+-                pad = self.compute_padsize(H, W, 56)
++                pad = self.compute_padsize(H, W, self.pad_multiple)
+ 
+                 if any(pad):
+                     crop_img = nn.functional.pad(crop_img, pad)  # zero padding

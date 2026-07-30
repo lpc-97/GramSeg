@@ -1,0 +1,30 @@
+__pycache__/
+*.py[cod]
+*.so
+.ipynb_checkpoints/
+
+# Never commit weights, datasets, or run outputs to this repo.
+*.pth
+*.pt
+*.safetensors
+*.ckpt
+*.npz
+*.zip
+*.tar
+*.tar.gz
+data/
+datasets/
+logs/
+*.log
+region_masks*/
+batch*/
+summary.txt
+
+# Local env / editor
+.env
+.venv/
+venv/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

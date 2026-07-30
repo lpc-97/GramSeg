@@ -1,0 +1,28 @@
+#!/bin/bash
+# Reconstruction of the machine-local ~/night/common.sh that the batch scripts in
+# this directory `source`. The original was not part of the project tree -- it only
+# held cluster paths -- so this file lists the variables those scripts require.
+#
+# Copy to ~/night/common.sh and edit for your machine.
+
+# Root of your patched CorrCLIP checkout (see ../patches/README.md).
+export CC="$HOME/CorrCLIP"
+
+# Python interpreter for evaluation (the harness env: mmseg / mmengine / open_clip).
+export PY_EVAL="$HOME/miniconda3/envs/corrclip/bin/python"
+
+# Python interpreter for offline mask generation (may be the same as PY_EVAL).
+export PY_GEN="$PY_EVAL"
+
+# Directory the harness writes per-run mmseg logs into; the batch scripts grep it
+# for the final metric line.
+export LOG="$CC/bench/logs"
+
+# The scripts also assume, on top of the above:
+#   * an offline HuggingFace cache (they set HF_HUB_OFFLINE=1)
+#   * PYTHONNOUSERSITE=1, to keep user-site packages from shadowing the env
+#   * CACHE_ROOT for the dino.txt / SD 2.1 baseline weight caches
+#     (defaults to $HOME/cache in the scripts that use it)
+#   * CUDA_VISIBLE_DEVICES indices that exist on your machine
+#   * per-batch output dirs under $HOME (e.g. ~/batchU), created by each script
+export CACHE_ROOT="${CACHE_ROOT:-$HOME/cache}"
